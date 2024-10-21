@@ -1,6 +1,7 @@
 import pandas as pd
 import os
 import numpy as np
+import math
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.naive_bayes import MultinomialNB
@@ -186,11 +187,14 @@ def moyenne(liste):
     # Recherche des statisques + moyenne
     taille = len(liste)
     resultat = [0]*len(liste[0])
+    somme_carre = [0]*len(liste[0])
     n=0
     for x in liste[0] :
         resultat[n] = [0]*len(x)
+        somme_carre[n] = [0]*len(x)
         for y in range(len(sensible)):
             resultat[n][y] = [0]*7
+            somme_carre[n][y] = [0]*7
         n = n+1
     for x in liste:
         m = 0
@@ -204,9 +208,27 @@ def moyenne(liste):
                 resultat[m][o][4] = resultat[m][o][4] + (z.false_positive_rate()/taille)
                 resultat[m][o][5] = resultat[m][o][5] + (z.false_negative_rate()/taille)
                 resultat[m][o][6] = resultat[m][o][6] + (z.error_rate_difference()/taille)
+
+                somme_carre[m][o][0] += (z.statistical_parity_difference() ** 2) / taille
+                somme_carre[m][o][1] += (z.disparate_impact() ** 2) / taille
+                somme_carre[m][o][2] += (z.generalized_equalized_odds_difference() ** 2) / taille
+                somme_carre[m][o][3] += (z.equal_opportunity_difference() ** 2) / taille
+                somme_carre[m][o][4] += (z.false_positive_rate() ** 2) / taille
+                somme_carre[m][o][5] += (z.false_negative_rate() ** 2) / taille
+                somme_carre[m][o][6] += (z.error_rate_difference() ** 2) / taille
                 o = o+1
             m = m+1
-    return resultat
+
+    ecart_type = [0]*len(liste[0])
+    for n in range(len(resultat)):
+        ecart_type[n] = [0]*len(resultat[n])
+        for y in range(len(resultat[n])):
+            ecart_type[n][y] = [0]*7
+            for stat in range(7):
+                variance = somme_carre[n][y][stat] - (resultat[n][y][stat] ** 2)
+                ecart_type[n][y][stat] = math.sqrt(variance)
+
+    return resultat, ecart_type
 
 def main ():
     # Modification et Creation de donnée pour base de donnée bank-full
@@ -218,12 +240,14 @@ def main ():
 
     # Test sur bank-full
     test = multiple(df_bankN,10)
-    result = moyenne(test)
+    result, stdev = moyenne(test)
 
     # Tableau avec les resultats
     methode.extend(["naive_bayes", "logistic_regression", "k_neighbors", "random_forest", "neural_network", "support_vector_machine"])
     columns = ["Methode_sensible",'Statistical Parity Difference', 'Disparate Impact', 'Generalized Equalized Odds Difference',
                'Equal Opportunity Difference', 'False Positive Rate', 'False Negative Rate', 'Error Rate Difference']
+
+    print("Moyenne :")
     res_final=[]
     res_final.append(columns)
     for s in range(len(sensible)):
@@ -236,6 +260,20 @@ def main ():
 
     for x in range(len(res_final)):
         print(res_final[x])
+
+    print("Stdev :")
+    stdev_final=[]
+    stdev_final.append(columns)
+    for s in range(len(sensible)):
+        for m in range(len(methode)):
+            rows = []
+            row_name = f"{methode[m]}_{sensible[s]}"
+            rows.append(row_name)
+            rows.extend([(stdev[m][s][i] / result[m][s][i]) * 100 if result[m][s][i] != 0 else 0 for i in range(len(result[m][s]))])
+            stdev_final.append(rows)
+
+    for x in range(len(stdev_final)):
+        print(stdev_final[x])
 
 def maindeux ():
     # Modification et Creation de donnée pour base de donnée student-por
@@ -248,12 +286,14 @@ def maindeux ():
 
     # Test sur student-por
     test = multiple(df_studentN,10)
-    result = moyenne(test)
+    result, stdev = moyenne(test)
 
     # Tableau avec les resultats
     methode = (["naive_bayes", "logistic_regression", "k_neighbors", "random_forest", "neural_network", "support_vector_machine"])
     columns = ["Methode_sensible",'Statistical Parity Difference', 'Disparate Impact', 'Generalized Equalized Odds Difference',
                'Equal Opportunity Difference', 'False Positive Rate', 'False Negative Rate', 'Error Rate Difference']
+
+    print("Moyenne :")
     res_final=[]
     res_final.append(columns)
     for s in range(len(sensible)):
@@ -267,5 +307,19 @@ def maindeux ():
     for x in range(len(res_final)):
         print(res_final[x])
 
-main()
+    print("Stdev :")
+    stdev_final=[]
+    stdev_final.append(columns)
+    for s in range(len(sensible)):
+        for m in range(len(methode)):
+            rows = []
+            row_name = f"{methode[m]}_{sensible[s]}"
+            rows.append(row_name)
+            rows.extend([(stdev[m][s][i] / result[m][s][i]) * 100 if result[m][s][i] != 0 else 0 for i in range(len(result[m][s]))])
+            stdev_final.append(rows)
+
+    for x in range(len(stdev_final)):
+        print(stdev_final[x])
+
+#main()
 maindeux()
