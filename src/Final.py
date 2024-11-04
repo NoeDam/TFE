@@ -2,6 +2,7 @@ import pandas as pd
 import os
 import numpy as np
 import math
+import matplotlib.pyplot as plt
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.naive_bayes import MultinomialNB
@@ -102,7 +103,7 @@ def metric_privilege(dataframe):
         dataset = BinaryLabelDataset(df=dataframe, label_names=['yN'], protected_attribute_names=[sensible[x]])
         dataset_original = BinaryLabelDataset(df=df_original, label_names=['yN'], protected_attribute_names=[sensible[x]])
         unp_group = [{sensible[x]: v} for v in unprivilege[x]]
-        p_group = [{sensible[x]: privilege[x]}]
+        p_group = [{sensible[x]: v} for v in privilege[x]]
         metric.append(ClassificationMetric(dataset_original, dataset,unprivileged_groups=unp_group,privileged_groups=p_group))
     return metric
 
@@ -193,29 +194,23 @@ def moyenne(liste):
         resultat[n] = [0]*len(x)
         somme_carre[n] = [0]*len(x)
         for y in range(len(sensible)):
-            resultat[n][y] = [0]*7
-            somme_carre[n][y] = [0]*7
+            resultat[n][y] = [0]*4
+            somme_carre[n][y] = [0]*4
         n = n+1
     for x in liste:
         m = 0
         for y in x :
             o = 0
             for z in y :
-                resultat[m][o][0] = resultat[m][o][0] + (z.statistical_parity_difference()/taille)
-                resultat[m][o][1] = resultat[m][o][1] + (z.disparate_impact()/taille)
-                resultat[m][o][2] = resultat[m][o][2] + (z.generalized_equalized_odds_difference()/taille)
-                resultat[m][o][3] = resultat[m][o][3] + (z.equal_opportunity_difference()/taille)
-                resultat[m][o][4] = resultat[m][o][4] + (z.false_positive_rate()/taille)
-                resultat[m][o][5] = resultat[m][o][5] + (z.false_negative_rate()/taille)
-                resultat[m][o][6] = resultat[m][o][6] + (z.error_rate_difference()/taille)
+                resultat[m][o][0] = resultat[m][o][0] + (z.disparate_impact()/taille)
+                resultat[m][o][1] = resultat[m][o][1] + (z.equal_opportunity_difference()/taille)
+                resultat[m][o][2] = resultat[m][o][2] + (z.accuracy()/taille)
+                resultat[m][o][3] = resultat[m][o][3] + (z.error_rate_difference()/taille)
 
-                somme_carre[m][o][0] += (z.statistical_parity_difference() ** 2) / taille
-                somme_carre[m][o][1] += (z.disparate_impact() ** 2) / taille
-                somme_carre[m][o][2] += (z.generalized_equalized_odds_difference() ** 2) / taille
-                somme_carre[m][o][3] += (z.equal_opportunity_difference() ** 2) / taille
-                somme_carre[m][o][4] += (z.false_positive_rate() ** 2) / taille
-                somme_carre[m][o][5] += (z.false_negative_rate() ** 2) / taille
-                somme_carre[m][o][6] += (z.error_rate_difference() ** 2) / taille
+                somme_carre[m][o][0] += (z.disparate_impact() ** 2) / taille
+                somme_carre[m][o][1] += (z.equal_opportunity_difference() ** 2) / taille
+                somme_carre[m][o][2] += (z.accuracy() ** 2) / taille
+                somme_carre[m][o][3] += (z.error_rate_difference() ** 2) / taille
                 o = o+1
             m = m+1
 
@@ -223,31 +218,38 @@ def moyenne(liste):
     for n in range(len(resultat)):
         ecart_type[n] = [0]*len(resultat[n])
         for y in range(len(resultat[n])):
-            ecart_type[n][y] = [0]*7
-            for stat in range(7):
+            ecart_type[n][y] = [0]*4
+            for stat in range(4):
                 variance = somme_carre[n][y][stat] - (resultat[n][y][stat] ** 2)
                 ecart_type[n][y][stat] = math.sqrt(variance)
 
     return resultat, ecart_type
+
+def plot_bar(test_name, x, y, stdev, bidule):
+    plt.figure()
+    plt.bar(x, y, yerr=stdev, width=0.4)
+    plt.xlabel("Methode")
+    plt.ylabel(test_name)
+    plt.title("Methode " + test_name)
+    plt.savefig(f"../Graph/{bidule}_{test_name}.png")
+    plt.close()
 
 def main ():
     # Modification et Creation de donnée pour base de donnée bank-full
     df_bank = takeDataframe('bank-full.csv', 'utf-8')
     df_bankN = numeric(df_bank)
     sensible.extend(['maritalN','educationN'])
-    privilege.extend([2,3])
+    privilege.extend([[2],[3]])
     unprivilege.extend([[0, 1], [0, 1, 2]])
 
     # Test sur bank-full
     test = multiple(df_bankN,10)
-    result, stdev = moyenne(test)
+    result = moyenne(test)
 
     # Tableau avec les resultats
     methode.extend(["naive_bayes", "logistic_regression", "k_neighbors", "random_forest", "neural_network", "support_vector_machine"])
     columns = ["Methode_sensible",'Statistical Parity Difference', 'Disparate Impact', 'Generalized Equalized Odds Difference',
-               'Equal Opportunity Difference', 'False Positive Rate', 'False Negative Rate', 'Error Rate Difference']
-
-    print("Moyenne :")
+               'Equal Opportunity Difference', 'False Positive Rate', 'Accuracy', 'Error Rate Difference']
     res_final=[]
     res_final.append(columns)
     for s in range(len(sensible)):
@@ -261,28 +263,14 @@ def main ():
     for x in range(len(res_final)):
         print(res_final[x])
 
-    print("Stdev :")
-    stdev_final=[]
-    stdev_final.append(columns)
-    for s in range(len(sensible)):
-        for m in range(len(methode)):
-            rows = []
-            row_name = f"{methode[m]}_{sensible[s]}"
-            rows.append(row_name)
-            rows.extend([(stdev[m][s][i] / result[m][s][i]) * 100 if result[m][s][i] != 0 else 0 for i in range(len(result[m][s]))])
-            stdev_final.append(rows)
-
-    for x in range(len(stdev_final)):
-        print(stdev_final[x])
-
 def maindeux ():
     # Modification et Creation de donnée pour base de donnée student-por
     df_student = takeDataframe('student-por.csv', 'utf-8')
     df_studentN = numerique(df_student)
     global sensible, privilege, unprivilege, methode
-    sensible = (['sexN'])
-    privilege = ([1])
-    unprivilege = ([[0]])
+    sensible = (['sexN','age'])
+    privilege = ([[1],[15,16,17,18]])
+    unprivilege = ([[0],[19,20,21,22]])
 
     # Test sur student-por
     test = multiple(df_studentN,10)
@@ -290,8 +278,7 @@ def maindeux ():
 
     # Tableau avec les resultats
     methode = (["naive_bayes", "logistic_regression", "k_neighbors", "random_forest", "neural_network", "support_vector_machine"])
-    columns = ["Methode_sensible",'Statistical Parity Difference', 'Disparate Impact', 'Generalized Equalized Odds Difference',
-               'Equal Opportunity Difference', 'False Positive Rate', 'False Negative Rate', 'Error Rate Difference']
+    columns = ["Methode_sensible",'Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference']
 
     print("Moyenne :")
     res_final=[]
@@ -307,19 +294,26 @@ def maindeux ():
     for x in range(len(res_final)):
         print(res_final[x])
 
-    print("Stdev :")
-    stdev_final=[]
-    stdev_final.append(columns)
-    for s in range(len(sensible)):
-        for m in range(len(methode)):
-            rows = []
-            row_name = f"{methode[m]}_{sensible[s]}"
-            rows.append(row_name)
-            rows.extend([(stdev[m][s][i] / result[m][s][i]) * 100 if result[m][s][i] != 0 else 0 for i in range(len(result[m][s]))])
-            stdev_final.append(rows)
+    #print("Stdev :")
+    #stdev_final=[]
+    #stdev_final.append(columns)
+    #for s in range(len(sensible)):
+    #    for m in range(len(methode)):
+    #        rows = []
+    #        row_name = f"{methode[m]}_{sensible[s]}"
+    #        rows.append(row_name)
+    #        rows.extend([(stdev[m][s][i] / result[m][s][i]) * 100 if result[m][s][i] != 0 else 0 for i in range(len(result[m][s]))])
+    #        stdev_final.append(rows)
 
-    for x in range(len(stdev_final)):
-        print(stdev_final[x])
+
+    for s in range(len(sensible)):
+        for m in range(len(columns)-1):
+            y = [result[i][s][m] for i in range(len(methode))]
+            standev = [stdev[i][s][m] for i in range(len(methode))]
+            plot_bar(columns[m+1],methode,y,standev,sensible[s])
+
+    #for x in range(len(stdev_final)):
+    #    print(stdev_final[x])
 
 #main()
 maindeux()
