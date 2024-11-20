@@ -34,6 +34,8 @@ def takeDataframe(name, encoding):
 def numerique(dataframe) :
     # Numerise student-por
     dataframeN = dataframe
+    age_mapping = {15: 1, 16: 1, 17: 1, 18: 1, 19: 0, 20: 0, 21: 0, 22: 0}
+    dataframeN = dataframeN.assign(ageN = dataframe['age'].map(age_mapping).fillna(0).astype(int))
     school_mapping = {"GP":0, "MS":1}
     dataframeN = dataframeN.assign(schoolN = dataframe['school'].map(school_mapping))
     sex_mapping = {"F":0, "M":1}
@@ -177,6 +179,7 @@ def multiple(dataframe, n):
         x[column] = x[column].astype('category').cat.codes
     memoire = [0] * n
     for m in range(n):
+        #print(m)
         tmp = []
         random_state = np.random.randint(0, 1000)
         x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.33, random_state=random_state)
@@ -194,8 +197,8 @@ def moyenne(liste):
         resultat[n] = [0]*len(x)
         somme_carre[n] = [0]*len(x)
         for y in range(len(sensible)):
-            resultat[n][y] = [0]*4
-            somme_carre[n][y] = [0]*4
+            resultat[n][y] = [0]*6
+            somme_carre[n][y] = [0]*6
         n = n+1
     for x in liste:
         m = 0
@@ -206,11 +209,16 @@ def moyenne(liste):
                 resultat[m][o][1] = resultat[m][o][1] + (z.equal_opportunity_difference()/taille)
                 resultat[m][o][2] = resultat[m][o][2] + (z.accuracy()/taille)
                 resultat[m][o][3] = resultat[m][o][3] + (z.error_rate_difference()/taille)
+                resultat[m][o][4] = resultat[m][o][4] + (((z.true_negative_rate()/taille) + (z.true_positive_rate()/taille))/2)
+                resultat[m][o][5] = resultat[m][o][5] + (z.generalized_entropy_index()/taille)
+
 
                 somme_carre[m][o][0] += (z.disparate_impact() ** 2) / taille
                 somme_carre[m][o][1] += (z.equal_opportunity_difference() ** 2) / taille
                 somme_carre[m][o][2] += (z.accuracy() ** 2) / taille
                 somme_carre[m][o][3] += (z.error_rate_difference() ** 2) / taille
+                somme_carre[m][o][4] += ((((z.true_negative_rate()/taille) + (z.true_positive_rate()/taille))/2) ** 2) / taille
+                somme_carre[m][o][5] += (z.generalized_entropy_index() ** 2) / taille
                 o = o+1
             m = m+1
 
@@ -218,7 +226,7 @@ def moyenne(liste):
     for n in range(len(resultat)):
         ecart_type[n] = [0]*len(resultat[n])
         for y in range(len(resultat[n])):
-            ecart_type[n][y] = [0]*4
+            ecart_type[n][y] = [0]*6
             for stat in range(4):
                 variance = somme_carre[n][y][stat] - (resultat[n][y][stat] ** 2)
                 ecart_type[n][y][stat] = math.sqrt(variance)
@@ -238,47 +246,18 @@ def main ():
     # Modification et Creation de donnée pour base de donnée bank-full
     df_bank = takeDataframe('bank-full.csv', 'utf-8')
     df_bankN = numeric(df_bank)
-    sensible.extend(['maritalN','educationN'])
-    privilege.extend([[2],[3]])
-    unprivilege.extend([[0, 1], [0, 1, 2]])
+    global sensible, privilege, unprivilege, methode
+    sensible = (['maritalN','educationN'])
+    privilege = ([[2], [3]])
+    unprivilege = ([[0, 1], [0, 1, 2]])
 
     # Test sur bank-full
     test = multiple(df_bankN,10)
-    result = moyenne(test)
-
-    # Tableau avec les resultats
-    methode.extend(["naive_bayes", "logistic_regression", "k_neighbors", "random_forest", "neural_network", "support_vector_machine"])
-    columns = ["Methode_sensible",'Statistical Parity Difference', 'Disparate Impact', 'Generalized Equalized Odds Difference',
-               'Equal Opportunity Difference', 'False Positive Rate', 'Accuracy', 'Error Rate Difference']
-    res_final=[]
-    res_final.append(columns)
-    for s in range(len(sensible)):
-        for m in range(len(methode)):
-            rows = []
-            row_name = f"{methode[m]}_{sensible[s]}"
-            rows.append(row_name)
-            rows.extend(result[m][s])
-            res_final.append(rows)
-
-    for x in range(len(res_final)):
-        print(res_final[x])
-
-def maindeux ():
-    # Modification et Creation de donnée pour base de donnée student-por
-    df_student = takeDataframe('student-por.csv', 'utf-8')
-    df_studentN = numerique(df_student)
-    global sensible, privilege, unprivilege, methode
-    sensible = (['sexN','age'])
-    privilege = ([[1],[15,16,17,18]])
-    unprivilege = ([[0],[19,20,21,22]])
-
-    # Test sur student-por
-    test = multiple(df_studentN,10)
     result, stdev = moyenne(test)
 
     # Tableau avec les resultats
     methode = (["naive_bayes", "logistic_regression", "k_neighbors", "random_forest", "neural_network", "support_vector_machine"])
-    columns = ["Methode_sensible",'Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference']
+    columns = ["Methode_sensible",'Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference', 'Balance Accuracy', 'Generalized entropy index']
 
     print("Moyenne :")
     res_final=[]
@@ -294,17 +273,42 @@ def maindeux ():
     for x in range(len(res_final)):
         print(res_final[x])
 
-    #print("Stdev :")
-    #stdev_final=[]
-    #stdev_final.append(columns)
-    #for s in range(len(sensible)):
-    #    for m in range(len(methode)):
-    #        rows = []
-    #        row_name = f"{methode[m]}_{sensible[s]}"
-    #        rows.append(row_name)
-    #        rows.extend([(stdev[m][s][i] / result[m][s][i]) * 100 if result[m][s][i] != 0 else 0 for i in range(len(result[m][s]))])
-    #        stdev_final.append(rows)
+    for s in range(len(sensible)):
+        for m in range(len(columns)-1):
+            y = [result[i][s][m] for i in range(len(methode))]
+            standev = [stdev[i][s][m] for i in range(len(methode))]
+            plot_bar(columns[m+1],methode,y,standev,sensible[s])
 
+def maindeux ():
+    # Modification et Creation de donnée pour base de donnée student-por
+    df_student = takeDataframe('student-por.csv', 'utf-8')
+    df_studentN = numerique(df_student)
+    global sensible, privilege, unprivilege, methode
+    sensible = (['sexN', 'ageN'])
+    privilege = ([[1], [1]])
+    unprivilege = ([[0], [0]])
+
+    # Test sur student-por
+    test = multiple(df_studentN,10)
+    result, stdev = moyenne(test)
+
+    # Tableau avec les resultats
+    methode = (["naive_bayes", "logistic_regression", "k_neighbors", "random_forest", "neural_network", "support_vector_machine"])
+    columns = ["Methode_sensible",'Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference', 'Balance Accuracy', 'Generalized entropy index']
+
+    print("Moyenne :")
+    res_final=[]
+    res_final.append(columns)
+    for s in range(len(sensible)):
+        for m in range(len(methode)):
+            rows = []
+            row_name = f"{methode[m]}_{sensible[s]}"
+            rows.append(row_name)
+            rows.extend(result[m][s])
+            res_final.append(rows)
+
+    for x in range(len(res_final)):
+        print(res_final[x])
 
     for s in range(len(sensible)):
         for m in range(len(columns)-1):
@@ -312,8 +316,6 @@ def maindeux ():
             standev = [stdev[i][s][m] for i in range(len(methode))]
             plot_bar(columns[m+1],methode,y,standev,sensible[s])
 
-    #for x in range(len(stdev_final)):
-    #    print(stdev_final[x])
 
-#main()
+main()
 maindeux()
