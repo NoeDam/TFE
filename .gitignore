@@ -1,0 +1,7 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+.idea/
+Graph/*.png
+Dataset/north_carolina_cut.csv
+
