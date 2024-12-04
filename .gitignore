@@ -4,4 +4,5 @@
 .idea/
 Graph/*.png
 Dataset/north_carolina_cut.csv
-
+src/*.pkl
+*.pkl
