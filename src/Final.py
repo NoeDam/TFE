@@ -4,10 +4,11 @@ import pickle
 import numpy as np
 import math
 import matplotlib.pyplot as plt
+from scipy.stats import wilcoxon
 from sklearn.model_selection import KFold
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import train_test_split
+#from sklearn.model_selection import train_test_split
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
@@ -593,7 +594,6 @@ def effacer_fichiers_graph():
         if os.path.isfile(chemin_fichier):
             os.remove(chemin_fichier)
 
-
 def sauvergarder(df,filename):
     test = multiple(df,5,True)
     with open(filename, "wb") as fichier:
@@ -660,6 +660,54 @@ def adult():
     sauvergarder(df_adultN,"Adult.pkl")
     sauvergarder_hyper(df_adultN,"Adult_hyper.pkl")
 
+def wilson_coxon(data1, data2, data3, data4, data5):
+    columns = ['Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference', 'Balance Accuracy', 'Generalized entropy index']
+    all_data = [data1, data2, data3, data4, data5]
+    classifiers = ["naive_bayes", "logistic_regression", "k_neighbors", "random_forest", "neural_network", "support_vector_machine"]
+    
+    functions = [
+        lambda x: x.disparate_impact(),
+        lambda x: x.equal_opportunity_difference(),
+        lambda x: x.accuracy(),
+        lambda x: x.error_rate_difference(),
+        lambda x: (x.true_negative_rate() + x.true_positive_rate())/2,
+        lambda x: x.generalized_entropy_index()
+    ]
+    
+    for m in range(6):
+        g1 = []
+        g2 = []
+        g3 = []
+        g4 = []
+        g5 = []
+        g6 = []
+        g = [g1, g2, g3, g4, g5, g6]
+        for i, data in enumerate(all_data, start=1):
+            for n in range(2):
+                for j in range(5):
+                    g1.append(functions[m](data[j][0][n]))
+                    g2.append(functions[m](data[j][1][n]))
+                    g3.append(functions[m](data[j][2][n]))
+                    g4.append(functions[m](data[j][3][n]))
+                    g5.append(functions[m](data[j][4][n]))
+                    g6.append(functions[m](data[j][5][n]))
+        tab = np.empty((6, 6), dtype=object)  
+        for i in range(6):
+            for j in range(6):
+                if i < j: 
+                    stat, p_value = wilcoxon(g[i], g[j])
+                    tab[i, j] = p_value
+                else:
+                    tab[i, j] = None  
+        
+        print(f"Metric: {columns[m]}")
+        print("\t\t" + "\t".join(classifiers))
+        for i in range(6):
+            row = [classifiers[i]] + [f"{tab[i, j]:.4f}" if tab[i, j] is not None else "N/A" for j in range(6)]
+            print("\t".join(row)) 
+        
+        print()
+
 #bank()
 student()
 #law()
@@ -669,21 +717,23 @@ student()
 effacer_fichiers_graph()
 
 with open("Bank.pkl", "rb") as fichier:
-    test = pickle.load(fichier)
-calcul(test,"bank")
+    result_bank = pickle.load(fichier)
+#calcul(result_bank,"bank")
 
 with open("Student.pkl", "rb") as fichier:
-    test = pickle.load(fichier)
-calcul(test,"student")
+    result_student = pickle.load(fichier)
+calcul(result_student,"student")
 
 with open("Law.pkl", "rb") as fichier:
-    test = pickle.load(fichier)
-calcul(test,"law")
+    result_law = pickle.load(fichier)
+#calcul(result_law,"law")
 
 with open("German.pkl", "rb") as fichier:
-    test = pickle.load(fichier)
-calcul(test,"german")
-
+    result_german = pickle.load(fichier)
+#calcul(result_german,"german")
+ 
 with open("Adult.pkl", "rb") as fichier:
-    test = pickle.load(fichier)
-calcul(test,"adult")
+    result_adult = pickle.load(fichier)
+#calcul(result_adult,"adult")
+
+wilson_coxon(result_bank, result_student, result_law, result_german, result_adult)
