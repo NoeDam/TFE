@@ -4,10 +4,16 @@ import pickle
 import numpy as np
 import math
 import matplotlib.pyplot as plt
+import warnings
+import inspect
+import seaborn as sns
+from autorank import autorank, plot_stats
 from scipy.stats import wilcoxon
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.model_selection import KFold
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import f1_score
 #from sklearn.model_selection import train_test_split
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.neighbors import KNeighborsClassifier
@@ -17,6 +23,8 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from aif360.datasets import BinaryLabelDataset
 from aif360.metrics import ClassificationMetric
+
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 sensible = []
 privilege = []
@@ -43,6 +51,9 @@ def takeDataframe(name, encoding):
     chemin = os.path.join(dossier, name)
     if((name == 'compas-scores-two-years.csv') or name == 'adult.data.txt' or name == 'lawschool.csv' or name == 'german_credit_risk.csv' ):
         dataframe = pd.read_csv(chemin,sep=',', encoding=encoding)
+    elif name == 'default_credit.csv':
+        dataframe = pd.read_csv(chemin, skiprows=1)
+        dataframe.rename(columns={'default payment next month': 'yN'}, inplace=True)
     else:
         dataframe = pd.read_csv(chemin,sep=';', encoding=encoding)
     
@@ -428,58 +439,61 @@ def multiple(dataframe, n, bool):
     return memoire
 
 def moyenne(liste):
-    # Recherche des statisques + moyenne
     taille = len(liste)
-    resultat = [0]*len(liste[0])
-    somme_carre = [0]*len(liste[0])
-    n=0
-    for x in liste[0] :
-        resultat[n] = [0]*len(x)
-        somme_carre[n] = [0]*len(x)
-        for y in range(len(sensible)):
-            resultat[n][y] = [0]*6
-            somme_carre[n][y] = [0]*6
-        n = n+1
+    nb_m = len(liste[0])
+    nb_o = len(liste[0][0])
+    nb_stat = 7
+
+    # Initialisation des structures de données
+    somme = [[[0.0 for _ in range(nb_stat)] for _ in range(nb_o)] for _ in range(nb_m)]
+    valeurs = [[[[] for _ in range(nb_stat)] for _ in range(nb_o)] for _ in range(nb_m)]
+
+    # Parcours de tous les résultats
     for x in liste:
-        m = 0
-        for y in x :
-            o = 0
-            for z in y :
-                resultat[m][o][0] = resultat[m][o][0] + (z.disparate_impact()/taille)
-                resultat[m][o][1] = resultat[m][o][1] + (z.equal_opportunity_difference()/taille)
-                resultat[m][o][2] = resultat[m][o][2] + (z.accuracy()/taille)
-                resultat[m][o][3] = resultat[m][o][3] + (z.error_rate_difference()/taille)
-                resultat[m][o][4] = resultat[m][o][4] + (((z.true_negative_rate()/taille) + (z.true_positive_rate()/taille))/2)
-                resultat[m][o][5] = resultat[m][o][5] + (z.generalized_entropy_index()/taille)
+        for m, y in enumerate(x):
+            for o, z in enumerate(y):
+                stats = [
+                    z.disparate_impact(),
+                    z.equal_opportunity_difference(),
+                    z.accuracy(),
+                    z.error_rate_difference(),
+                    (z.true_negative_rate() + z.true_positive_rate()) / 2,
+                    z.generalized_entropy_index(),
+                    0.0  # F1-score sera calculé à part
+                ]
 
+                precision = z.precision()
+                recall = z.recall()
+                if precision + recall == 0:
+                    f1 = 0.0
+                else:
+                    f1 = 2 * precision * recall / (precision + recall)
+                stats[6] = f1
 
-                somme_carre[m][o][0] += (z.disparate_impact() ** 2) / taille
-                somme_carre[m][o][1] += (z.equal_opportunity_difference() ** 2) / taille
-                somme_carre[m][o][2] += (z.accuracy() ** 2) / taille
-                somme_carre[m][o][3] += (z.error_rate_difference() ** 2) / taille
-                somme_carre[m][o][4] += ((((z.true_negative_rate()/taille) + (z.true_positive_rate()/taille))/2) ** 2) / taille
-                somme_carre[m][o][5] += (z.generalized_entropy_index() ** 2) / taille
-                o = o+1
-            m = m+1
+                for i in range(nb_stat):
+                    somme[m][o][i] += stats[i]
+                    valeurs[m][o][i].append(stats[i])
 
-    ecart_type = [0]*len(liste[0])
-    for n in range(len(resultat)):
-        ecart_type[n] = [0]*len(resultat[n])
-        for y in range(len(resultat[n])):
-            ecart_type[n][y] = [0]*6
-            for stat in range(4):
-                variance = somme_carre[n][y][stat] - (resultat[n][y][stat] ** 2)
-                ecart_type[n][y][stat] = math.sqrt(variance)
+    # Moyenne
+    moyenne = [[[somme[m][o][i] / taille for i in range(nb_stat)] for o in range(nb_o)] for m in range(nb_m)]
 
-    return resultat, ecart_type
+    # Variance classique
+    ecart_type = [[[0.0 for _ in range(nb_stat)] for _ in range(nb_o)] for _ in range(nb_m)]
+    for m in range(nb_m):
+        for o in range(nb_o):
+            for i in range(nb_stat):
+                variance = sum((val - moyenne[m][o][i]) ** 2 for val in valeurs[m][o][i]) / taille
+                ecart_type[m][o][i] = math.sqrt(variance)
+
+    return moyenne, ecart_type
 
 def plot_bar(test_name, x, y, stdev, bidule, name):
     plt.figure()
     plt.bar(x, y, yerr=stdev, width=0.4)
     plt.xlabel("Methode")
     plt.ylabel(test_name)
-    plt.title("Methode " + test_name)
-    plt.savefig(f"../Graph/{name}_{bidule}_{test_name}.png")
+    plt.title(name +" " + test_name)
+    plt.savefig(f"./Graph/{name}_{bidule}_{test_name}.png")
     plt.close()
 
 def plot_bar_parametre (test_name, x, y, stdev, bidule, name, methode):
@@ -488,15 +502,20 @@ def plot_bar_parametre (test_name, x, y, stdev, bidule, name, methode):
     plt.xlabel(methode)
     plt.ylabel(test_name)
     plt.title(methode + test_name)
-    plt.savefig(f"../Graph/{name}_{bidule}_{test_name}_{methode}.png")
+    plt.savefig(f"./Graph/{name}_{bidule}_{test_name}_{methode}.png")
     plt.close()
 
 def calcul(test,name):
     result, stdev = moyenne(test)
 
+    if not os.path.exists("./Graph"):
+        print("Création Graph")
+        os.makedirs("./Graph")
+
     # Tableau avec les resultats
-    methode = (["naive_bayes", "logistic_regression", "k_neighbors", "random_forest", "neural_network", "support_vector_machine"])
-    columns = ["Methode_sensible",'Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference', 'Balance Accuracy', 'Generalized entropy index']
+    methode = (["NB", "LR", "KNN", "RF", "NN", "SVM"])
+    columns = ["Methode_sensible",'Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference', 'Balance Accuracy', 'Generalized entropy index', 'F1 Score']
+
 
     print("Moyenne :")
     res_final=[]
@@ -523,7 +542,8 @@ def calcul_hyperparametre(test,name):
     result_NB, stdev_NB = moyenne(tableau_NB)
 
     methode = (["0.1", "1", "10"])
-    columns = ["Methode_sensible",'Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference', 'Balance Accuracy', 'Generalized entropy index']
+    columns = ["Methode_sensible",'Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference', 'Balance Accuracy', 'Generalized entropy index', 'F1 Score']
+
 
     for s in range(len(sensible)):
         for m in range(len(columns)-1):
@@ -537,7 +557,8 @@ def calcul_hyperparametre(test,name):
     result_KNN, stdev_KNN = moyenne(tableau_KNN)
 
     methode = (["5", "10", "20"])
-    columns = ["Methode_sensible",'Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference', 'Balance Accuracy', 'Generalized entropy index']
+    columns = ["Methode_sensible",'Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference', 'Balance Accuracy', 'Generalized entropy index', 'F1 Score']
+
 
     for s in range(len(sensible)):
         for m in range(len(columns)-1):
@@ -549,7 +570,8 @@ def calcul_hyperparametre(test,name):
     result_RF, stdev_RF = moyenne(tableau_RF)
 
     methode = (["50", "100", "300"])
-    columns = ["Methode_sensible",'Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference', 'Balance Accuracy', 'Generalized entropy index']
+    columns = ["Methode_sensible",'Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference', 'Balance Accuracy', 'Generalized entropy index', 'F1 Score']
+
 
     for s in range(len(sensible)):
         for m in range(len(columns)-1):
@@ -561,7 +583,8 @@ def calcul_hyperparametre(test,name):
     result_NN, stdev_NN = moyenne(tableau_NN)
 
     methode = (["(100,)","(50, 50)" ,"(100, 50, 30)"])
-    columns = ["Methode_sensible",'Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference', 'Balance Accuracy', 'Generalized entropy index']
+    columns = ["Methode_sensible",'Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference', 'Balance Accuracy', 'Generalized entropy index', 'F1 Score']
+
 
     for s in range(len(sensible)):
         for m in range(len(columns)-1):
@@ -573,7 +596,8 @@ def calcul_hyperparametre(test,name):
     result_SVM, stdev_SVM = moyenne(tableau_SVM)
 
     methode = (["0.1", "1", "10"])
-    columns = ["Methode_sensible",'Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference', 'Balance Accuracy', 'Generalized entropy index']
+    columns = ["Methode_sensible",'Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference', 'Balance Accuracy', 'Generalized entropy index', 'F1 Score']
+
 
     for s in range(len(sensible)):
         for m in range(len(columns)-1):
@@ -582,7 +606,7 @@ def calcul_hyperparametre(test,name):
             plot_bar_parametre(columns[m+1],methode,y,standev,sensible[s],name+"_parametre","SVM")
 
 def effacer_fichiers_graph():
-    dossier = "../Graph/"  
+    dossier = "./Graph/"  
     
     if not os.path.exists(dossier):
         print(f"Le dossier {dossier} n'existe pas.")
@@ -604,6 +628,32 @@ def sauvergarder_hyper(df,filename):
     with open(filename, "wb") as fichier:
         pickle.dump(test, fichier)
 
+def analyse_dataframe(df, yN, sensible, unprivilege):
+    # Récupération du nom de la variable passée
+    callers_local_vars = inspect.currentframe().f_back.f_locals.items()
+    df_name = [var_name for var_name, var_val in callers_local_vars if var_val is df]
+    df_name = df_name[0] if df_name else "df"
+
+    # Taille du dataframe
+    nb_rows, nb_cols = df.shape
+    print(f"Voici {df_name} avec {nb_rows} lignes et {nb_cols} colonnes.")
+
+    # Pourcentage de 1 dans la colonne yN
+    if yN in df.columns:
+        pct_yN_1 = (df[yN] == 1).mean() * 100
+        print(f"Pourcentage de 1 dans la colonne '{yN}': {pct_yN_1:.2f}%")
+    else:
+        print(f"Colonne '{yN}' non trouvée dans {df_name}.")
+
+    # Analyse des colonnes sensibles
+    print("\nAnalyse des colonnes sensibles (unprivileged values) :")
+    for col, unpriv_vals in zip(sensible, unprivilege):
+        if col in df.columns:
+            pct_unpriv = df[col].isin(unpriv_vals).mean() * 100
+            print(f" - {col} : {pct_unpriv:.2f}% des valeurs sont dans {unpriv_vals} (unprivileged)")
+        else:
+            print(f" - {col} : colonne non trouvée dans {df_name}")
+
 def bank():
     df_bank = takeDataframe('bank-full.csv', 'utf-8')
     df_bankN = numeric(df_bank)
@@ -611,6 +661,8 @@ def bank():
     sensible = (['maritalN','educationN'])
     privilege = ([[2], [3]])
     unprivilege = ([[0, 1], [0, 1, 2]])
+    print_disparate_impact(df_bankN, "yN", sensible, unprivilege, privilege)
+    analyse_dataframe(df_bankN, "yN", sensible, unprivilege)
     sauvergarder(df_bankN,"Bank.pkl")
     sauvergarder_hyper(df_bankN,"Bank_hyper.pkl")
 
@@ -621,6 +673,8 @@ def student():
     sensible = (['sexN', 'ageN'])
     privilege = ([[1], [1]])
     unprivilege = ([[0], [0]])
+    print_disparate_impact(df_studentN, "yN", sensible, unprivilege, privilege)
+    analyse_dataframe(df_studentN, "yN", sensible, unprivilege)
     sauvergarder(df_studentN,"Student.pkl")
     sauvergarder_hyper(df_studentN,"Student_hyper.pkl")
 
@@ -633,6 +687,8 @@ def law():
     sensible = (['gender', 'race7'])
     privilege = ([[1], [1]])
     unprivilege = ([[0], [0]])
+    print_disparate_impact(df_law, "yN", sensible, unprivilege, privilege)
+    analyse_dataframe(df_law, "yN", sensible, unprivilege)
     sauvergarder(df_law,"Law.pkl")
     sauvergarder_hyper(df_law,"Law_hyper.pkl")
 
@@ -646,6 +702,8 @@ def german():
     sensible = (['sexN', 'AgeN'])
     privilege = ([[1], [1]])
     unprivilege = ([[0], [0]])
+    print_disparate_impact(df_germanN, "yN", sensible, unprivilege, privilege)
+    analyse_dataframe(df_germanN, "yN", sensible, unprivilege)
     sauvergarder(df_germanN,"German.pkl")
     sauvergarder_hyper(df_germanN,"German_hyper.pkl")
 
@@ -657,83 +715,212 @@ def adult():
     sensible = (['sexN','raceN'])
     privilege = ([[0], [0]])
     unprivilege = ([[1], [1,2,3,4]])
+    print_disparate_impact(df_adultN, "yN", sensible, unprivilege, privilege)
+    analyse_dataframe(df_adultN, "yN", sensible, unprivilege)
     sauvergarder(df_adultN,"Adult.pkl")
     sauvergarder_hyper(df_adultN,"Adult_hyper.pkl")
 
-def wilson_coxon(data1, data2, data3, data4, data5):
-    columns = ['Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference', 'Balance Accuracy', 'Generalized entropy index']
-    all_data = [data1, data2, data3, data4, data5]
-    classifiers = ["naive_bayes", "logistic_regression", "k_neighbors", "random_forest", "neural_network", "support_vector_machine"]
+def default():
+    df_default = takeDataframe('default_credit.csv', 'utf-8')
+    df_default.drop(columns=['ID'], inplace=True)
+    global sensible, privilege, unprivilege, methode
+    sensible = (['SEX', 'MARRIAGE'])
+    privilege = ([[1], [1]])       # Male, Married
+    unprivilege = ([[2], [0, 2, 3]])
+    print_disparate_impact(df_default, "yN", sensible, unprivilege, privilege)
+    analyse_dataframe(df_default, "yN", sensible, unprivilege)
+    sauvergarder(df_default, "Default.pkl")
+    sauvergarder_hyper(df_default, "Default_hyper.pkl")
+
+def plot_wilcoxon_heatmap(result_bank, result_student, result_law, result_german, result_adult, result_default):
+    columns = ['Disparate Impact','Equal Opportunity Difference', 'Accuracy', 'Error Rate Difference', 'Balance Accuracy', 'Generalized entropy index', 'F1 Score']
+    all_data = [result_bank, result_student, result_law, result_german, result_adult, result_default]
+    classifiers = ["Naive Bayes", "Logistic Regression", "KNN", "Random Forest", "Neural Network", "SVM"]
     
     functions = [
         lambda x: x.disparate_impact(),
         lambda x: x.equal_opportunity_difference(),
         lambda x: x.accuracy(),
         lambda x: x.error_rate_difference(),
-        lambda x: (x.true_negative_rate() + x.true_positive_rate())/2,
-        lambda x: x.generalized_entropy_index()
+        lambda x: (x.true_negative_rate() + x.true_positive_rate()) / 2,
+        lambda x: x.generalized_entropy_index(),
+        lambda x: 2 * x.precision() * x.recall() / (x.precision() + x.recall())
     ]
+
+    for m in range(7):
+        g = [[] for _ in range(6)]
+        for data in all_data:
+            for i in range(6):
+                g[i].extend([functions[m](data[j][i][0]) for j in range(5)])  # sensible index 0
+
+        matrix = np.full((6,6), np.nan)
+        for i in range(6):
+            for j in range(i+1, 6):
+                stat, p = wilcoxon(g[i], g[j])
+                matrix[i][j] = p
+                matrix[j][i] = p
+
+        plt.figure(figsize=(10, 7))
+        sns.heatmap(matrix, xticklabels=classifiers, yticklabels=classifiers, annot=True, cmap='coolwarm', fmt=".3f")
+        plt.title(f"P-values Wilcoxon - {columns[m]}")
+        plt.tight_layout()
+        plt.savefig(f"./Graph/wilcoxon_{columns[m].replace(' ', '_')}.png")
+        plt.close()
+
+def collect_all_metrics(metric_index):
+    all_data = []
+    model_names = ["NB", "LR", "KNN", "RF", "NN", "SVM"]
+
+    all_results = [
+        ("bank", result_bank),
+        ("student", result_student),
+        ("law", result_law),
+        ("german", result_german),
+        ("adult", result_adult),
+        ("default", result_default)
+    ]
+
+    for name, dataset in all_results:
+        for sensitive_index in range(2): 
+            for fold in range(5): 
+                for model in range(6): 
+                    z = dataset[fold][model][sensitive_index]
+                    precision = z.precision()
+                    recall = z.recall()
+                    f1 = 2 * precision * recall / (precision + recall) 
+
+                    metric = [
+                        z.disparate_impact(),
+                        z.equal_opportunity_difference(),
+                        z.accuracy(),
+                        z.error_rate_difference(),
+                        (z.true_negative_rate() + z.true_positive_rate()) / 2,
+                        z.generalized_entropy_index(),
+                        f1
+                    ][metric_index]
+                    all_data.append({
+                        "Model": model_names[model],
+                        "Score": metric,
+                        "Fold": fold,
+                        "Sensitive Index": sensitive_index,
+                        "Dataset": name
+                    })
     
-    for m in range(6):
-        g1 = []
-        g2 = []
-        g3 = []
-        g4 = []
-        g5 = []
-        g6 = []
-        g = [g1, g2, g3, g4, g5, g6]
-        for i, data in enumerate(all_data, start=1):
-            for n in range(2):
-                for j in range(5):
-                    g1.append(functions[m](data[j][0][n]))
-                    g2.append(functions[m](data[j][1][n]))
-                    g3.append(functions[m](data[j][2][n]))
-                    g4.append(functions[m](data[j][3][n]))
-                    g5.append(functions[m](data[j][4][n]))
-                    g6.append(functions[m](data[j][5][n]))
-        tab = np.empty((6, 6), dtype=object)  
-        for i in range(6):
-            for j in range(6):
-                if i < j: 
-                    stat, p_value = wilcoxon(g[i], g[j])
-                    tab[i, j] = p_value
-                else:
-                    tab[i, j] = None  
-        
-        print(f"Metric: {columns[m]}")
-        print("\t\t" + "\t".join(classifiers))
-        for i in range(6):
-            row = [classifiers[i]] + [f"{tab[i, j]:.4f}" if tab[i, j] is not None else "N/A" for j in range(6)]
-            print("\t".join(row)) 
-        
-        print()
+    df = pd.DataFrame(all_data)
+    
+    print(df.head())
+    
+    df_wide = df.pivot(index=["Dataset", "Fold", "Sensitive Index"], columns="Model", values="Score")
+    
+    return df_wide
+
+def generate_global_cd_diagram(metric_index, title):
+    if metric_index in [1, 3]:
+        df_metrics = collect_all_metrics(metric_index).applymap(abs)
+    elif metric_index == 0 :
+        df_metrics = collect_all_metrics(metric_index).applymap(lambda x: abs(math.log(x)))
+    else :
+        df_metrics = collect_all_metrics(metric_index)
+    if metric_index in [0, 1, 3, 5] :
+        result = autorank(df_metrics, alpha=0.05, verbose=True, order='ascending')
+    else :
+        result = autorank(df_metrics, alpha=0.05, verbose=True)
+    plot_stats(result,allow_insignificant = True)
+    plt.savefig(f"./Graph/nemenyi_{title.replace(' ', '_').replace(':', '').replace('-', '')}.png")
+    plt.close()
+
+def print_disparate_impact(df, target, sensible_attrs, unprivileged_vals, privileged_vals):
+    print("== Disparate Impact Initial ==")
+    for attr, unpriv, priv in zip(sensible_attrs, unprivileged_vals, privileged_vals):
+        prot_group = df[df[attr].isin(unpriv)]
+        priv_group = df[df[attr].isin(priv)]
+
+        p_prot = (prot_group[target] == 1).mean()
+        p_priv = (priv_group[target] == 1).mean()
+
+        if p_priv == 0:
+            di = float('inf')
+        else:
+            di = p_prot / p_priv
+
+        print(f"{attr} → DI = {di:.3f} (prot.={p_prot:.3f}, priv.={p_priv:.3f})")
+    print()
 
 #bank()
 student()
 #law()
 #german()
 #adult()
+#default() 
 
 effacer_fichiers_graph()
 
 with open("Bank.pkl", "rb") as fichier:
     result_bank = pickle.load(fichier)
-#calcul(result_bank,"bank")
+    sensible = (['maritalN','educationN'])
+calcul(result_bank, "Bank")
+
+with open("Bank_hyper.pkl", "rb") as fichier:
+    result_bank_hyper = pickle.load(fichier)
+    sensible = (['maritalN','educationN'])
+calcul_hyperparametre(result_bank_hyper, "Bank")
 
 with open("Student.pkl", "rb") as fichier:
     result_student = pickle.load(fichier)
-calcul(result_student,"student")
+    sensible = (['sexN', 'ageN'])
+calcul(result_student, "Student")
+
+with open("Student_hyper.pkl", "rb") as fichier:
+    result_student_hyper = pickle.load(fichier)
+    sensible = (['sexN', 'ageN'])
+calcul_hyperparametre(result_student_hyper, "Student")
 
 with open("Law.pkl", "rb") as fichier:
     result_law = pickle.load(fichier)
-#calcul(result_law,"law")
+    sensible = (['gender', 'race7'])
+calcul(result_law, "Law")
+
+with open("Law_hyper.pkl", "rb") as fichier:
+    result_law_hyper = pickle.load(fichier)
+    sensible = (['gender', 'race7'])
+calcul_hyperparametre(result_law_hyper, "Law")
 
 with open("German.pkl", "rb") as fichier:
     result_german = pickle.load(fichier)
-#calcul(result_german,"german")
- 
+    sensible = (['sexN', 'AgeN'])
+calcul(result_german, "German")
+
+with open("German_hyper.pkl", "rb") as fichier:
+    result_german_hyper = pickle.load(fichier)
+    sensible = (['sexN', 'AgeN'])
+calcul_hyperparametre(result_german_hyper, "German")
+
 with open("Adult.pkl", "rb") as fichier:
     result_adult = pickle.load(fichier)
-#calcul(result_adult,"adult")
+    sensible = (['sexN','raceN'])
+calcul(result_adult, "Adult")
 
-wilson_coxon(result_bank, result_student, result_law, result_german, result_adult)
+with open("Adult_hyper.pkl", "rb") as fichier:
+    result_adult_hyper = pickle.load(fichier)
+    sensible = (['sexN','raceN'])
+calcul_hyperparametre(result_adult_hyper, "Adult")
+
+with open("Default.pkl", "rb") as fichier:
+    result_default = pickle.load(fichier)
+    sensible = (['SEX', 'MARRIAGE'])
+calcul(result_default, "Default")
+
+with open("Default_hyper.pkl", "rb") as fichier:
+    result_default_hyper = pickle.load(fichier)
+    sensible = (['SEX', 'MARRIAGE'])
+calcul_hyperparametre(result_default_hyper, "Default")
+
+plot_wilcoxon_heatmap(result_bank, result_student, result_law, result_german, result_adult, result_default)
+
+generate_global_cd_diagram(metric_index=0, title="Nemenyi Diagram - Disparate Impact across all datasets & attributes")
+generate_global_cd_diagram(metric_index=1, title="Nemenyi Diagram - Equal Opportunity Difference across all datasets & attributes")
+generate_global_cd_diagram(metric_index=2, title="Nemenyi Diagram - Accuracy across all datasets & attributes")
+generate_global_cd_diagram(metric_index=3, title="Nemenyi Diagram - Error Rate Difference across all datasets & attributes")
+generate_global_cd_diagram(metric_index=4, title="Nemenyi Diagram - Balance Accuracy across all datasets & attributes")
+generate_global_cd_diagram(metric_index=5, title="Nemenyi Diagram - Generalized entropy index across all datasets & attributes")
+generate_global_cd_diagram(metric_index=6, title="Nemenyi Diagram - F1 Score across all datasets & attributes")
